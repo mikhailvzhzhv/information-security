@@ -9,6 +9,7 @@ import (
 const (
 	KEY_LENGTH         = 32
 	KEY_BLOCKS         = 8
+	MESSAGE_BLOCK      = 8
 	CIPHER_ROUNDS      = 24
 	CIPHER_LAST_ROUNDS = 8
 )
@@ -24,13 +25,73 @@ var sboxes = [8][16]byte{
 	{1, 15, 13, 0, 5, 7, 10, 4, 9, 2, 3, 14, 6, 11, 8, 12},
 }
 
+type Blocks struct {
+	blocks []*Block
+}
+
+func NewBlocks(message []byte) *Blocks {
+	messageLength := len(message)
+	blocksCount := calculateBlocks(messageLength)
+	blocks := make([]*Block, blocksCount)
+
+	for i := 0; i < blocksCount; i++ {
+		blocks[i] = NewBlock(message[i*MESSAGE_BLOCK:])
+	}
+
+	return &Blocks{blocks: blocks}
+}
+
+func (blocks *Blocks) GetData() []byte {
+	var data []byte
+	for _, block := range blocks.blocks {
+		data = append(data, block.ToBytes()...)
+	}
+
+	return data
+}
+
 type Block struct {
-	L [4]byte
-	R [4]byte
+	HasExtra bool
+	L        [4]byte
+	R        [4]byte
 }
 
 func NewBlock(message []byte) *Block {
-	return &Block{L: [4]byte(message[0:4]), R: [4]byte(message[4:8])}
+	hasExtra := false
+	var extraByte byte = 0
+	messageLength := len(message)
+
+	if messageLength < MESSAGE_BLOCK {
+		hasExtra = true
+		extraByte = byte(MESSAGE_BLOCK - messageLength)
+	}
+
+	var A []byte
+	if messageLength < MESSAGE_BLOCK {
+		A = append(A, message[0:messageLength]...)
+		for i := messageLength; i < 8; i++ {
+			A = append(A, extraByte)
+		}
+	} else {
+		A = append(A, message[0:MESSAGE_BLOCK]...)
+	}
+
+	return &Block{HasExtra: hasExtra, L: [4]byte(A[0:4]), R: [4]byte(A[4:8])}
+}
+
+func (block *Block) ToBytes() []byte {
+	var message []byte
+
+	var count int = 0
+	if block.HasExtra {
+		extra := block.R[3]
+		count = int(extra)
+	}
+
+	message = append(message, block.L[:]...)
+	message = append(message, block.R[:]...)
+
+	return message[0 : MESSAGE_BLOCK-count]
 }
 
 type Key struct {
@@ -56,88 +117,72 @@ func GenerateKey() (*Key, error) {
 	return &Key{key}, nil
 }
 
-func Encrypt() {
+func calculateBlocks(messageLength int) int {
+	blocksCount := messageLength / MESSAGE_BLOCK
+	if messageLength%MESSAGE_BLOCK > 0 {
+		blocksCount += 1
+	}
 
+	return blocksCount
+}
+
+func Encrypt(message []byte, key *Key) []byte {
+	blocks := NewBlocks(message)
+
+	for _, block := range blocks.blocks {
+		EncryptBlock(block, key)
+	}
+
+	return blocks.GetData()
 }
 
 func EncryptBlock(block *Block, key *Key) {
 	for i := 0; i < CIPHER_ROUNDS; i++ {
-		var carry uint32
-		smod, _ := bits.Add32(bytesToUint32(block.R), bytesToUint32(key.GetBlock(i)), carry)
-		smodb := uint32ToBytes(smod)
-
-		var ssimple [4]byte
-		for j := 0; j < 8; j++ {
-			sblock := (smodb[j/2] >> (4 * j)) & byte(15)
-			v := sboxes[j][sblock]
-			ssimple[j/2] |= v << (4 * j)
-		}
-
-		srol := bits.RotateLeft32(bytesToUint32(ssimple), 11)
-		sxor := srol ^ bytesToUint32(block.L)
-
-		block.L = block.R
-		block.R = uint32ToBytes(sxor)
+		TransformBlock(block, key.GetBlock(i))
 	}
 
 	for i := CIPHER_LAST_ROUNDS - 1; i >= 0; i-- {
-		var carry uint32
-		smod, _ := bits.Add32(bytesToUint32(block.R), bytesToUint32(key.GetBlock(i)), carry)
-		smodb := uint32ToBytes(smod)
-
-		var ssimple [4]byte
-		for j := 0; j < 8; j++ {
-			sblock := (smodb[j/2] >> (4 * j)) & byte(15)
-			v := sboxes[j][sblock]
-			ssimple[j/2] |= v << (4 * j)
-		}
-
-		srol := bits.RotateLeft32(bytesToUint32(ssimple), 11)
-		sxor := srol ^ bytesToUint32(block.L)
-
-		block.L = block.R
-		block.R = uint32ToBytes(sxor)
+		TransformBlock(block, key.GetBlock(i))
 	}
 }
 
-func Decrypt(block *Block, key *Key) {
+func TransformBlock(block *Block, keyBlock [4]byte) {
+	var carry uint32
+	smod, _ := bits.Add32(bytesToUint32(block.R), bytesToUint32(keyBlock), carry)
+	smodb := uint32ToBytes(smod)
+
+	var ssimple [4]byte
+	for j := 0; j < 8; j++ {
+		sblock := (smodb[j/2] >> (4 * j)) & byte(15)
+		v := sboxes[j][sblock]
+		ssimple[j/2] |= v << (4 * j)
+	}
+
+	srol := bits.RotateLeft32(bytesToUint32(ssimple), 11)
+	sxor := srol ^ bytesToUint32(block.L)
+
+	block.L = block.R
+	block.R = uint32ToBytes(sxor)
+}
+
+func DecryptBlock(block *Block, key *Key) {
 	for i := 0; i < CIPHER_LAST_ROUNDS; i++ {
-		var carry uint32
-		smod, _ := bits.Add32(bytesToUint32(block.R), bytesToUint32(key.GetBlock(i)), carry)
-		smodb := uint32ToBytes(smod)
-
-		var ssimple [4]byte
-		for j := 0; j < 8; j++ {
-			sblock := (smodb[j/2] >> (4 * j)) & byte(15)
-			v := sboxes[j][sblock]
-			ssimple[j/2] |= v << (4 * j)
-		}
-
-		srol := bits.RotateLeft32(bytesToUint32(ssimple), 11)
-		sxor := srol ^ bytesToUint32(block.L)
-
-		block.L = block.R
-		block.R = uint32ToBytes(sxor)
+		TransformBlock(block, key.GetBlock(i))
 	}
 
 	for i := CIPHER_ROUNDS - 1; i >= 0; i-- {
-		var carry uint32
-		smod, _ := bits.Add32(bytesToUint32(block.R), bytesToUint32(key.GetBlock(i)), carry)
-		smodb := uint32ToBytes(smod)
-
-		var ssimple [4]byte
-		for j := 0; j < 8; j++ {
-			sblock := (smodb[j/2] >> (4 * j)) & byte(15)
-			v := sboxes[j][sblock]
-			ssimple[j/2] |= v << (4 * j)
-		}
-
-		srol := bits.RotateLeft32(bytesToUint32(ssimple), 11)
-		sxor := srol ^ bytesToUint32(block.L)
-
-		block.L = block.R
-		block.R = uint32ToBytes(sxor)
+		TransformBlock(block, key.GetBlock(i))
 	}
+}
+
+func Decrypt(encrypted []byte, key *Key) []byte {
+	blocks := NewBlocks(encrypted)
+
+	for _, block := range blocks.blocks {
+		DecryptBlock(block, key)
+	}
+
+	return blocks.GetData()
 }
 
 func bytesToUint32(b [4]byte) uint32 {

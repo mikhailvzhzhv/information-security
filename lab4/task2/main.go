@@ -3,21 +3,62 @@ package main
 import (
 	"fmt"
 	"gost_28147-89/crypto"
+	"log"
+	"os"
+	"path/filepath"
 )
 
 func main() {
-	message := []byte("Bimmo world!! ImStud@22.ru")
+	var filepathStr string
 
-	key, _ := crypto.GenerateKey()
-	block := crypto.NewBlock(message)
+	fmt.Print("enter filepath: ")
+	fmt.Scan(&filepathStr)
 
-	fmt.Printf("message: %s\n", message)
+	data, err := os.ReadFile(filepathStr)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	crypto.EncryptBlock(block, key)
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	fmt.Printf("encrypted: %s%s\n", block.L, block.R)
+	base := filepath.Base(filepathStr)
+	ext := filepath.Ext(base)
+	nameWithoutExt := base[:len(base)-len(ext)]
 
-	crypto.Decrypt(block, key)
+	encryptedFilepath := nameWithoutExt + "_encrypted"
+	decryptedFilepath := nameWithoutExt + "_decrypted" + ext
 
-	fmt.Printf("decrypted: %s%s\n", block.L, block.R)
+	encrypted := crypto.Encrypt(data, key)
+	efile, err := os.Create(encryptedFilepath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = efile.Write(encrypted)
+	if err != nil {
+		efile.Close()
+		log.Fatal(err)
+	}
+	fmt.Println("Encrypted file saved as:", encryptedFilepath)
+
+	data, err = os.ReadFile(encryptedFilepath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	decrypted := crypto.Decrypt(data, key)
+	dfile, err := os.Create(decryptedFilepath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dfile.Close()
+
+	_, err = dfile.Write(decrypted)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Decrypted file saved as:", decryptedFilepath)
 }
