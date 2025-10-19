@@ -95,13 +95,13 @@ func (block *Block) ToBytes() []byte {
 }
 
 type Key struct {
-	key [KEY_LENGTH]byte
+	Key [KEY_LENGTH]byte
 }
 
 func (key *Key) GetBlock(i int) [4]byte {
 	blockNum := i % KEY_BLOCKS
 	var block [4]byte
-	copy(block[:], key.key[blockNum*4:blockNum*4+4])
+	copy(block[:], key.Key[blockNum*4:blockNum*4+4])
 
 	return block
 }
