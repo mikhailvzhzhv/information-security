@@ -7,8 +7,9 @@ import (
 )
 
 func Test(t *testing.T) {
+	key, _ := crypto.GenerateKey()
 	msg := []byte("askjsallk lskdckllsad s")
-	hash := crypto.MerkleDamgardHash(msg)
+	hash := crypto.Imitovstavka(msg, key)
 	fmt.Printf("Hash: %x\n", hash)
 
 	crypto.TestAvalancheEffect()

@@ -6,6 +6,38 @@ import (
 	"math/rand"
 )
 
+func Imitovstavka(message []byte, key *Key) []byte {
+	blocks := NewBlocks(message)
+	accumulator := blocks.blocks[0].ToBytes()
+
+	for k, block := range blocks.blocks {
+		blockBytes := block.ToBytes()
+
+		encryptBlock := &Block{
+			L: [4]byte{accumulator[0], accumulator[1], accumulator[2], accumulator[3]},
+			R: [4]byte{accumulator[4], accumulator[5], accumulator[6], accumulator[7]},
+		}
+
+		for i := 0; i < 16; i++ {
+			TransformBlock(encryptBlock, key.GetBlock(i))
+		}
+
+		if k < len(blocks.blocks)-1 {
+			encryptedBytes := encryptBlock.ToBytes()
+			var open []byte
+			open = append(open, blocks.blocks[k+1].L[:]...)
+			open = append(open, blocks.blocks[k+1].R[:]...)
+			for j := 0; j < len(blockBytes); j++ {
+				encryptedBytes[j] ^= open[j]
+			}
+
+			copy(accumulator, encryptedBytes)
+		}
+	}
+
+	return accumulator[0:4]
+}
+
 func MerkleDamgardHash(message []byte) []byte {
 	H := []byte("abcdefgh")
 	blocks := NewBlocks(message)
@@ -49,8 +81,9 @@ func HammingDistance(a, b []byte) int {
 
 func TestAvalancheEffect() {
 	message := []byte("The quick brown fox jumps over the lazy dog")
+	key, _ := GenerateKey()
 
-	hash1 := MerkleDamgardHash(message)
+	hash1 := Imitovstavka(message, key)
 
 	message2 := make([]byte, len(message))
 	copy(message2, message)
@@ -62,7 +95,7 @@ func TestAvalancheEffect() {
 	fmt.Println(string(message))
 	fmt.Println(string(message2))
 
-	hash2 := MerkleDamgardHash(message2)
+	hash2 := Imitovstavka(message2, key)
 
 	dist := HammingDistance(hash1, hash2)
 	totalBits := len(hash1) * 8
